@@ -66,6 +66,6 @@ def dataParser():
     Xi, Xv = np.array(fd.train_feat_index), np.array(fd.train_feat_value)
     return Xi, Xv
 
-if __name__ == "__main__":
-    matrix = dataParser()
-    print(matrix.head())
+# if __name__ == "__main__":
+#     matrix = dataParser()
+#     print(matrix.head())
