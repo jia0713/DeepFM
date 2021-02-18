@@ -1,8 +1,13 @@
+import random
 import numpy as np
 import pandas as pd
 import tensorflow as tf
 import config
+from time import time
+from sklearn.model_selection import train_test_split
 from DataReader import dataParser
+
+from tensorflow.python import debug as tf_debug
 
 
 class DeepFM(object):
@@ -25,6 +30,8 @@ class DeepFM(object):
         self.field_size = field_size
         self.embedding_size = embedding_size
         self.dfm_params = cfg.dfm_params
+        self.batch_size = cfg.dfm_params["batch_size"]
+        self.epoch = cfg.dfm_params["epoch"]
         self._init_graph()
 
     def _init_weights(self):
@@ -66,6 +73,9 @@ class DeepFM(object):
         return weights
 
     def _init_graph(self):
+        """
+        [intialize graph]
+        """
         self.graph = tf.Graph()
         with self.graph.as_default():
             self.feat_index = tf.placeholder(
@@ -76,18 +86,21 @@ class DeepFM(object):
                 tf.float32, (None, 1), name="label")    # None
             self.weights = self._init_weights()
 
+            self.reshaped_feat_value = tf.reshape(
+                self.feat_value, [-1, self.field_size, 1])
+
             # first order items
             self.y_first_order_embedding = tf.nn.embedding_lookup(
                 self.weights["feature_bias"], self.feat_index)
             self.y_first_order = tf.reduce_sum(tf.multiply(
-                self.y_first_order_embedding, self.feat_value), 2)    # None * F * 1
+                self.y_first_order_embedding, self.reshaped_feat_value), 2, name="y_first_order")    # None * F * 1
             # self.y_first_order = tf.nn.dropout()
 
             # second order items
             self.embeddings = tf.nn.embedding_lookup(
                 self.weights["feature_embeddings"], self.feat_index)    # None * F * K, latent vector V
-            self.reshaped_feat_value = tf.reshape(
-                self.feat_value, [-1, self.field_size, 1])
+            # self.reshaped_feat_value = tf.reshape(
+            #     self.feat_value, [-1, self.field_size, 1])
             self.embeddings = tf.multiply(
                 self.embeddings, self.reshaped_feat_value)
             self.embeddings_sum = tf.reduce_sum(self.embeddings, 1)
@@ -95,9 +108,9 @@ class DeepFM(object):
                 self.embeddings_sum)  # None * K
             self.embeddings_square_sum = tf.reduce_sum(
                 tf.square(self.embeddings), 1)    # None * K
-            self.y_second_order = 0.5 * \
-                tf.subtract(self.embeddings_sum_square,
-                            self.embeddings_square_sum)
+            self.y_second_order = tf.multiply(0.5, tf.subtract(
+                self.embeddings_sum_square, self.embeddings_square_sum), name="y_second_order")
+
             # self.y_second_order = tf.nn.dropout()
 
             # deep component
@@ -126,6 +139,8 @@ class DeepFM(object):
             self.saver = tf.train.Saver()
             init = tf.global_variables_initializer()
             self.sess = self._init_session()
+            # self.sess = tf_debug.TensorBoardDebugWrapperSession(
+            #     self.sess, "127.0.0.1:6000")
             self.sess.run(init)
 
     def _init_session(self):
@@ -133,7 +148,120 @@ class DeepFM(object):
         config.gpu_options.allow_growth = True
         return tf.Session(config=config)
 
-# if __name__ == "__main__":
-#     Xi, Xv = dataParser()
-#     print(Xi.shape)
-#     dfm = DeepFM(feature_size=100, field_size=37, embedding_size=8)
+    def shuffle_datasets(self, Xi, Xv, y, valid_ratio):
+        random_seed = self.dfm_params["random_seed"]
+        if valid_ratio == 0.0:
+            random.seed(random_seed)
+            random.shuffle(Xi)
+            random.seed(random_seed)
+            random.shuffle(Xv)
+            random.seed(random_seed)
+            random.shuffle(y)
+            Xi_train, Xv_train, y_train, Xi_valid, Xv_valid, y_valid = Xi, Xv, y, None, None, None
+        else:
+            Xi_train, Xi_valid, Xv_train, Xv_valid, y_train, y_valid = train_test_split(
+                Xi, Xv, y, test_size=valid_ratio, random_state=random_seed)
+        return Xi_train, Xv_train, y_train, Xi_valid, Xv_valid, y_valid
+
+    # get batch data
+    def get_batch(self, Xi, Xv, y, index):
+        batch_size = self.batch_size
+        start = index * batch_size
+        end = (index + 1) * batch_size
+        end = end if end < len(y) else len(y)
+        return Xi[start:end], Xv[start:end], [[y_] for y_ in y[start:end]]
+
+    def fit_on_batch(self, Xi, Xv, y):
+        feed_dict = {self.feat_index: Xi,
+                     self.feat_value: Xv,
+                     self.label: y,
+                     #  self.dropout_keep_fm: self.dropout_fm,
+                     #  self.dropout_keep_deep: self.dropout_deep,
+                     #  self.train_phase: True
+                     }
+        loss, opt = self.sess.run(
+            (self.loss, self.optimizer), feed_dict=feed_dict)
+        # test_value = self.sess.run(self.loss, feed_dict=feed_dict)
+        return loss, opt
+
+    def fit(self, Xi, Xv, y, valid_ratio=0.0, early_stopping=False, refit=False):
+        """
+        Xi_train: [[ind1_1, ind1_2, ...], [ind2_1, ind2_2, ...], ..., [indi_1, indi_2, ..., indi_j, ...], ...]
+                         is the feature index of feature field j of sample i in the training set
+        Xv_train: [[val1_1, val1_2, ...], [val2_1, val2_2, ...], ..., [vali_1, vali_2, ..., vali_j, ...], ...]
+                         is the feature value of feature field j of sample i in the training set
+                         can be either binary (1/0, for binary/categorical features) or float (e.g., 10.24, for numerical features)
+        y_train: label of each sample in the training set
+        Xi_valid: list of list of feature indices of each sample in the validation set
+        Xv_valid: list of list of feature values of each sample in the validation set
+        y_valid: label of each sample in the validation set
+        early_stopping: perform early stopping or not
+        refit: refit the model on the train+valid dataset or not
+        :return: None
+        """
+        Xi_train, Xv_train, y_train, Xi_valid, Xv_valid, y_valid = self.shuffle_datasets(
+            Xi, Xv, y, valid_ratio)
+        loss_list = []
+        for epoch in range(self.epoch):
+            total_batch = len(y_train) // self.batch_size
+            for i in range(total_batch):
+                Xi_batch, Xv_batch, y_batch = self.get_batch(
+                    Xi_train, Xv_train, y_train, i)
+                loss, _ = self.fit_on_batch(Xi_batch, Xv_batch, y_batch)
+                # test_value, _ = self.fit_on_batch(Xi_batch, Xv_batch, y_batch)
+            print("epoch %s, loss is %.4f" % (str(epoch), loss))
+
+        # has_valid = Xv_valid is not None
+        # for epoch in range(self.epoch):
+        #     t1 = time()
+        #     # self.shuffle_in_unison_scary(Xi_train, Xv_train, y_train)
+        #     total_batch = int(len(y_train) / self.batch_size)
+        #     for i in range(total_batch):
+        #         Xi_batch, Xv_batch, y_batch = self.get_batch(
+        #             Xi_train, Xv_train, y_train, self.batch_size, i)
+        #         self.fit_on_batch(Xi_batch, Xv_batch, y_batch)
+
+        #     # evaluate training and validation datasets
+        #     train_result = self.evaluate(Xi_train, Xv_train, y_train)
+        #     self.train_result.append(train_result)
+        #     if has_valid:
+        #         valid_result = self.evaluate(Xi_valid, Xv_valid, y_valid)
+        #         self.valid_result.append(valid_result)
+        #     if self.verbose > 0 and epoch % self.verbose == 0:
+        #         if has_valid:
+        #             print("[%d] train-result=%.4f, valid-result=%.4f [%.1f s]"
+        #                   % (epoch + 1, train_result, valid_result, time() - t1))
+        #         else:
+        #             print("[%d] train-result=%.4f [%.1f s]"
+        #                   % (epoch + 1, train_result, time() - t1))
+        #     if has_valid and early_stopping and self.training_termination(self.valid_result):
+        #         break
+
+        # # fit a few more epoch on train+valid until result reaches the best_train_score
+        # if has_valid and refit:
+        #     if self.greater_is_better:
+        #         best_valid_score = max(self.valid_result)
+        #     else:
+        #         best_valid_score = min(self.valid_result)
+        #     best_epoch = self.valid_result.index(best_valid_score)
+        #     best_train_score = self.train_result[best_epoch]
+        #     Xi_train = Xi_train + Xi_valid
+        #     Xv_train = Xv_train + Xv_valid
+        #     y_train = y_train + y_valid
+        #     for epoch in range(100):
+        #         self.shuffle_in_unison_scary(Xi_train, Xv_train, y_train)
+        #         total_batch = int(len(y_train) / self.batch_size)
+        #         for i in range(total_batch):
+        #             Xi_batch, Xv_batch, y_batch = self.get_batch(Xi_train, Xv_train, y_train, i)
+        #             self.fit_on_batch(Xi_batch, Xv_batch, y_batch)
+        #         # check
+        #         train_result = self.evaluate(Xi_train, Xv_train, y_train)
+        #         if abs(train_result - best_train_score) < 0.001 or \
+        #             (self.greater_is_better and train_result > best_train_score) or \
+        #                 ((not self.greater_is_better) and train_result < best_train_score):
+        #             break
+if __name__ == "__main__":
+    Xi, Xv, y = dataParser()
+    dfm = DeepFM(feature_size=10000, field_size=37, embedding_size=8)
+    dfm.fit(Xi, Xv, y, valid_ratio=0.0)
+    # print(Xv)

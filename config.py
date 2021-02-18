@@ -46,5 +46,5 @@ dfm_params = {
     "l2_reg":0.01,
     "verbose":True,
     "eval_metric":'gini_norm',
-    "random_seed":3
+    "random_seed":300
 }

@@ -14,6 +14,7 @@ class FeatDict(object):
         self.test = pd.read_csv(cfg.Test_file)
         self.NUMERIC_COLS = cfg.NUMERIC_COLS
         self.IGNORE_COLS = cfg.IGNORE_COLS
+        self.label = self.train["target"]
         self._drop_ignore_cols()
         self._gen_feat_dict()
         self._gen_feat_matrix()
@@ -63,8 +64,8 @@ class FeatDict(object):
 
 def dataParser():
     fd = FeatDict()
-    Xi, Xv = np.array(fd.train_feat_index), np.array(fd.train_feat_value)
-    return Xi, Xv
+    Xi, Xv, y = np.array(fd.train_feat_index), np.array(fd.train_feat_value), np.array(fd.label)
+    return Xi, Xv, y
 
 # if __name__ == "__main__":
 #     matrix = dataParser()
