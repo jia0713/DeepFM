@@ -40,7 +40,11 @@ class FeatDict(object):
             else:
                 cat_list = list(self.df[col].unique())
                 self.feat_dict[col] = dict(
-                    zip(cat_list, range(self.total_feat, self.total_feat + len(cat_list))))
+                    zip(
+                        cat_list,
+                        range(self.total_feat, self.total_feat + len(cat_list)),
+                    )
+                )
                 self.total_feat += len(cat_list)
 
     def _gen_feat_matrix(self):
@@ -55,17 +59,24 @@ class FeatDict(object):
                 continue
             else:
                 self.train_feat_index[col] = self.train_feat_index[col].map(
-                    self.feat_dict[col])
+                    self.feat_dict[col]
+                )
                 self.test_feat_index[col] = self.test_feat_index[col].map(
-                    self.feat_dict[col])
+                    self.feat_dict[col]
+                )
                 self.train_feat_value[col] = 1
                 self.test_feat_value[col] = 1
 
 
 def dataParser():
     fd = FeatDict()
-    Xi, Xv, y = np.array(fd.train_feat_index), np.array(fd.train_feat_value), np.array(fd.label)
+    Xi, Xv, y = (
+        np.array(fd.train_feat_index),
+        np.array(fd.train_feat_value),
+        np.array(fd.label),
+    )
     return Xi, Xv, y
+
 
 # if __name__ == "__main__":
 #     matrix = dataParser()

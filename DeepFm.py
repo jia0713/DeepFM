@@ -13,7 +13,7 @@ from tensorflow.python import debug as tf_debug
 class DeepFM(object):
     """
 
-    [DeepFM model, original paper: 
+    [DeepFM model, original paper:
     DeepFM: A Factorization-Machine based Neural Network for CTR Prediction,
     Huifeng Guo, Ruiming Tang, Yunming Yey, Zhenguo Li, Xiuqiang He]
 
@@ -38,37 +38,73 @@ class DeepFM(object):
         weights = {}
 
         # embeddings
-        weights["feature_embeddings"] = tf.Variable(tf.random.normal([self.feature_size, self.embedding_size], 0.0, 0.1,
-                                                                     name="feature_embeddings"))    # N * K
-        weights["feature_bias"] = tf.Variable(tf.random.normal([self.feature_size, 1], 0.0, 0.1,
-                                                               name="feature_bias"))       # N * 1, first order bias, \omega in original paper
+        weights["feature_embeddings"] = tf.Variable(
+            tf.random.normal(
+                [self.feature_size, self.embedding_size],
+                0.0,
+                0.1,
+                name="feature_embeddings",
+            )
+        )  # N * K
+        weights["feature_bias"] = tf.Variable(
+            tf.random.normal([self.feature_size, 1], 0.0, 0.1, name="feature_bias")
+        )  # N * 1, first order bias, \omega in original paper
 
         # deep layers
         num_layers = len(self.dfm_params["deep_layers"])
         input_size = self.field_size * self.embedding_size
         # glorot initialization
-        glorot = np.sqrt(
-            2.0 / (input_size + self.dfm_params['deep_layers'][0]))
-        weights["layer_0"] = tf.Variable(np.random.normal(loc=0.0, scale=glorot,
-                                                          size=(input_size, self.dfm_params["deep_layers"][0])), dtype=np.float32)
-        weights["bias_0"] = tf.Variable(np.random.normal(loc=0.0, scale=glorot,
-                                                         size=(1, self.dfm_params["deep_layers"][0])), dtype=np.float32)
+        glorot = np.sqrt(2.0 / (input_size + self.dfm_params["deep_layers"][0]))
+        weights["layer_0"] = tf.Variable(
+            np.random.normal(
+                loc=0.0,
+                scale=glorot,
+                size=(input_size, self.dfm_params["deep_layers"][0]),
+            ),
+            dtype=np.float32,
+        )
+        weights["bias_0"] = tf.Variable(
+            np.random.normal(
+                loc=0.0, scale=glorot, size=(1, self.dfm_params["deep_layers"][0])
+            ),
+            dtype=np.float32,
+        )
         for i in range(1, num_layers):
             glorot = np.sqrt(
-                2.0 / (self.dfm_params["deep_layers"][i-1] + self.dfm_params['deep_layers'][i]))
-            weights["layer_%d" % i] = tf.Variable(np.random.normal(loc=0.0, scale=glorot, size=(
-                self.dfm_params["deep_layers"][i-1], self.dfm_params["deep_layers"][i])), dtype=np.float32)
-            weights["bias_%d" % i] = tf.Variable(np.random.normal(loc=0.0, scale=glorot,
-                                                                  size=(1, self.dfm_params["deep_layers"][i])), dtype=np.float32)
+                2.0
+                / (
+                    self.dfm_params["deep_layers"][i - 1]
+                    + self.dfm_params["deep_layers"][i]
+                )
+            )
+            weights["layer_%d" % i] = tf.Variable(
+                np.random.normal(
+                    loc=0.0,
+                    scale=glorot,
+                    size=(
+                        self.dfm_params["deep_layers"][i - 1],
+                        self.dfm_params["deep_layers"][i],
+                    ),
+                ),
+                dtype=np.float32,
+            )
+            weights["bias_%d" % i] = tf.Variable(
+                np.random.normal(
+                    loc=0.0, scale=glorot, size=(1, self.dfm_params["deep_layers"][i])
+                ),
+                dtype=np.float32,
+            )
 
         # final concat layers
-        input_size = self.field_size + self.embedding_size + \
-            self.dfm_params["deep_layers"][-1]
+        input_size = (
+            self.field_size + self.embedding_size + self.dfm_params["deep_layers"][-1]
+        )
         glorot = np.sqrt(2.0 / (input_size + 1))
-        weights["concat_layer"] = tf.Variable(np.random.normal(
-            loc=0.0, scale=glorot, size=(input_size, 1)), dtype=np.float32)
-        weights["concat_bias"] = tf.Variable(
-            tf.constant(0.01), dtype=np.float32)
+        weights["concat_layer"] = tf.Variable(
+            np.random.normal(loc=0.0, scale=glorot, size=(input_size, 1)),
+            dtype=np.float32,
+        )
+        weights["concat_bias"] = tf.Variable(tf.constant(0.01), dtype=np.float32)
 
         return weights
 
@@ -79,61 +115,80 @@ class DeepFM(object):
         self.graph = tf.Graph()
         with self.graph.as_default():
             self.feat_index = tf.placeholder(
-                tf.int32, (None, self.field_size), name="feat_index")    # None * F
+                tf.int32, (None, self.field_size), name="feat_index"
+            )  # None * F
             self.feat_value = tf.placeholder(
-                tf.float32, (None, self.field_size), name="feat_value")    # None * F
-            self.label = tf.placeholder(
-                tf.float32, (None, 1), name="label")    # None
+                tf.float32, (None, self.field_size), name="feat_value"
+            )  # None * F
+            self.label = tf.placeholder(tf.float32, (None, 1), name="label")  # None
             self.weights = self._init_weights()
 
             self.reshaped_feat_value = tf.reshape(
-                self.feat_value, [-1, self.field_size, 1])
+                self.feat_value, [-1, self.field_size, 1]
+            )
 
             # first order items
             self.y_first_order_embedding = tf.nn.embedding_lookup(
-                self.weights["feature_bias"], self.feat_index)
-            self.y_first_order = tf.reduce_sum(tf.multiply(
-                self.y_first_order_embedding, self.reshaped_feat_value), 2, name="y_first_order")    # None * F * 1
+                self.weights["feature_bias"], self.feat_index
+            )
+            self.y_first_order = tf.reduce_sum(
+                tf.multiply(self.y_first_order_embedding, self.reshaped_feat_value),
+                2,
+                name="y_first_order",
+            )  # None * F * 1
             # self.y_first_order = tf.nn.dropout()
 
             # second order items
             self.embeddings = tf.nn.embedding_lookup(
-                self.weights["feature_embeddings"], self.feat_index)    # None * F * K, latent vector V
+                self.weights["feature_embeddings"], self.feat_index
+            )  # None * F * K, latent vector V
             # self.reshaped_feat_value = tf.reshape(
             #     self.feat_value, [-1, self.field_size, 1])
-            self.embeddings = tf.multiply(
-                self.embeddings, self.reshaped_feat_value)
+            self.embeddings = tf.multiply(self.embeddings, self.reshaped_feat_value)
             self.embeddings_sum = tf.reduce_sum(self.embeddings, 1)
-            self.embeddings_sum_square = tf.square(
-                self.embeddings_sum)  # None * K
+            self.embeddings_sum_square = tf.square(self.embeddings_sum)  # None * K
             self.embeddings_square_sum = tf.reduce_sum(
-                tf.square(self.embeddings), 1)    # None * K
-            self.y_second_order = tf.multiply(0.5, tf.subtract(
-                self.embeddings_sum_square, self.embeddings_square_sum), name="y_second_order")
+                tf.square(self.embeddings), 1
+            )  # None * K
+            self.y_second_order = tf.multiply(
+                0.5,
+                tf.subtract(self.embeddings_sum_square, self.embeddings_square_sum),
+                name="y_second_order",
+            )
 
             # self.y_second_order = tf.nn.dropout()
 
             # deep component
             self.y_deep = tf.reshape(
-                self.embeddings, shape=[-1, self.field_size * self.embedding_size])    # None * (F * K)
+                self.embeddings, shape=[-1, self.field_size * self.embedding_size]
+            )  # None * (F * K)
             for i in range(0, len(self.dfm_params["deep_layers"])):
-                self.y_deep = tf.add(tf.matmul(
-                    self.y_deep, self.weights["layer_%d" % i]), self.weights["bias_%d" % i])
-                self.y_deep = self.dfm_params["deep_layer_activation"](
-                    self.y_deep)
+                self.y_deep = tf.add(
+                    tf.matmul(self.y_deep, self.weights["layer_%d" % i]),
+                    self.weights["bias_%d" % i],
+                )
+                self.y_deep = self.dfm_params["deep_layer_activation"](self.y_deep)
 
             # DeepFM
             self.concat_input = tf.concat(
-                [self.y_first_order, self.y_second_order, self.y_deep], axis=1)
-            self.final_output = tf.add(tf.matmul(
-                self.concat_input, self.weights["concat_layer"]), self.weights["concat_bias"])
+                [self.y_first_order, self.y_second_order, self.y_deep], axis=1
+            )
+            self.final_output = tf.add(
+                tf.matmul(self.concat_input, self.weights["concat_layer"]),
+                self.weights["concat_bias"],
+            )
             self.final_output = tf.nn.sigmoid(self.final_output)
 
             # loss and optimizer
-            self.loss = tf.losses.log_loss(tf.reshape(
-                self.label, (-1, 1)), self.final_output)
-            self.optimizer = tf.train.AdamOptimizer(learning_rate=self.dfm_params['learning_rate'], beta1=0.9, beta2=0.999,
-                                                    epsilon=1e-8).minimize(self.loss)
+            self.loss = tf.losses.log_loss(
+                tf.reshape(self.label, (-1, 1)), self.final_output
+            )
+            self.optimizer = tf.train.AdamOptimizer(
+                learning_rate=self.dfm_params["learning_rate"],
+                beta1=0.9,
+                beta2=0.999,
+                epsilon=1e-8,
+            ).minimize(self.loss)
 
             # init
             self.saver = tf.train.Saver()
@@ -157,10 +212,19 @@ class DeepFM(object):
             random.shuffle(Xv)
             random.seed(random_seed)
             random.shuffle(y)
-            Xi_train, Xv_train, y_train, Xi_valid, Xv_valid, y_valid = Xi, Xv, y, None, None, None
+            Xi_train, Xv_train, y_train, Xi_valid, Xv_valid, y_valid = (
+                Xi,
+                Xv,
+                y,
+                None,
+                None,
+                None,
+            )
         else:
             Xi_train, Xi_valid, Xv_train, Xv_valid, y_train, y_valid = train_test_split(
-                Xi, Xv, y, test_size=valid_ratio, random_state=random_seed)
+                Xi, Xv, y, test_size=valid_ratio, random_state=random_seed
+            )
+            y_valid = [[y_] for y_ in y_valid]
         return Xi_train, Xv_train, y_train, Xi_valid, Xv_valid, y_valid
 
     # get batch data
@@ -172,19 +236,35 @@ class DeepFM(object):
         return Xi[start:end], Xv[start:end], [[y_] for y_ in y[start:end]]
 
     def fit_on_batch(self, Xi, Xv, y):
-        feed_dict = {self.feat_index: Xi,
-                     self.feat_value: Xv,
-                     self.label: y,
-                     #  self.dropout_keep_fm: self.dropout_fm,
-                     #  self.dropout_keep_deep: self.dropout_deep,
-                     #  self.train_phase: True
-                     }
-        loss, opt = self.sess.run(
-            (self.loss, self.optimizer), feed_dict=feed_dict)
+        feed_dict = {
+            self.feat_index: Xi,
+            self.feat_value: Xv,
+            self.label: y
+            #  self.dropout_keep_fm: self.dropout_fm,
+            #  self.dropout_keep_deep: self.dropout_deep,
+            #  self.train_phase: True
+        }
+        loss, opt = self.sess.run((self.loss, self.optimizer), feed_dict=feed_dict)
         # test_value = self.sess.run(self.loss, feed_dict=feed_dict)
         return loss, opt
 
-    def fit(self, Xi, Xv, y, valid_ratio=0.0, early_stopping=False, refit=False):
+    def eval(self, Xi, Xv, y):
+        feed_dict = {self.feat_index: Xi, self.feat_value: Xv, self.label: y}
+        loss, final_output = self.sess.run(
+            (self.loss, self.final_output), feed_dict=feed_dict
+        )
+        return loss, final_output
+
+    def fit(
+        self,
+        Xi,
+        Xv,
+        y,
+        valid_ratio=0.0,
+        early_stopping=False,
+        refit=False,
+        eval_mode=True,
+    ):
         """
         Xi_train: [[ind1_1, ind1_2, ...], [ind2_1, ind2_2, ...], ..., [indi_1, indi_2, ..., indi_j, ...], ...]
                          is the feature index of feature field j of sample i in the training set
@@ -199,69 +279,39 @@ class DeepFM(object):
         refit: refit the model on the train+valid dataset or not
         :return: None
         """
-        Xi_train, Xv_train, y_train, Xi_valid, Xv_valid, y_valid = self.shuffle_datasets(
-            Xi, Xv, y, valid_ratio)
-        loss_list = []
+        (
+            Xi_train,
+            Xv_train,
+            y_train,
+            Xi_valid,
+            Xv_valid,
+            y_valid,
+        ) = self.shuffle_datasets(Xi, Xv, y, valid_ratio)
+        if y_valid == None:
+            eval_mode = False
         for epoch in range(self.epoch):
             total_batch = len(y_train) // self.batch_size
             for i in range(total_batch):
                 Xi_batch, Xv_batch, y_batch = self.get_batch(
-                    Xi_train, Xv_train, y_train, i)
+                    Xi_train, Xv_train, y_train, i
+                )
                 loss, _ = self.fit_on_batch(Xi_batch, Xv_batch, y_batch)
                 # test_value, _ = self.fit_on_batch(Xi_batch, Xv_batch, y_batch)
-            print("epoch %s, loss is %.4f" % (str(epoch), loss))
+            print("Epoch %s, train loss is %.4f" % (str(epoch), loss))
 
-        # has_valid = Xv_valid is not None
-        # for epoch in range(self.epoch):
-        #     t1 = time()
-        #     # self.shuffle_in_unison_scary(Xi_train, Xv_train, y_train)
-        #     total_batch = int(len(y_train) / self.batch_size)
-        #     for i in range(total_batch):
-        #         Xi_batch, Xv_batch, y_batch = self.get_batch(
-        #             Xi_train, Xv_train, y_train, self.batch_size, i)
-        #         self.fit_on_batch(Xi_batch, Xv_batch, y_batch)
+            if eval_mode:
+                correct = 0
+                val_loss, final_output = self.eval(Xi_valid, Xv_valid, y_valid)
+            final_output = [[1] if output >= 0.5 else [0] for output in final_output]
+            for i in range(len(y_valid)):
+                if final_output[i] == y_valid[i]:
+                    correct += 1
+            ratio = correct / len(y_valid)
+            print("val loss is %.4f, accuracy is %.4f" % (val_loss, ratio))
 
-        #     # evaluate training and validation datasets
-        #     train_result = self.evaluate(Xi_train, Xv_train, y_train)
-        #     self.train_result.append(train_result)
-        #     if has_valid:
-        #         valid_result = self.evaluate(Xi_valid, Xv_valid, y_valid)
-        #         self.valid_result.append(valid_result)
-        #     if self.verbose > 0 and epoch % self.verbose == 0:
-        #         if has_valid:
-        #             print("[%d] train-result=%.4f, valid-result=%.4f [%.1f s]"
-        #                   % (epoch + 1, train_result, valid_result, time() - t1))
-        #         else:
-        #             print("[%d] train-result=%.4f [%.1f s]"
-        #                   % (epoch + 1, train_result, time() - t1))
-        #     if has_valid and early_stopping and self.training_termination(self.valid_result):
-        #         break
 
-        # # fit a few more epoch on train+valid until result reaches the best_train_score
-        # if has_valid and refit:
-        #     if self.greater_is_better:
-        #         best_valid_score = max(self.valid_result)
-        #     else:
-        #         best_valid_score = min(self.valid_result)
-        #     best_epoch = self.valid_result.index(best_valid_score)
-        #     best_train_score = self.train_result[best_epoch]
-        #     Xi_train = Xi_train + Xi_valid
-        #     Xv_train = Xv_train + Xv_valid
-        #     y_train = y_train + y_valid
-        #     for epoch in range(100):
-        #         self.shuffle_in_unison_scary(Xi_train, Xv_train, y_train)
-        #         total_batch = int(len(y_train) / self.batch_size)
-        #         for i in range(total_batch):
-        #             Xi_batch, Xv_batch, y_batch = self.get_batch(Xi_train, Xv_train, y_train, i)
-        #             self.fit_on_batch(Xi_batch, Xv_batch, y_batch)
-        #         # check
-        #         train_result = self.evaluate(Xi_train, Xv_train, y_train)
-        #         if abs(train_result - best_train_score) < 0.001 or \
-        #             (self.greater_is_better and train_result > best_train_score) or \
-        #                 ((not self.greater_is_better) and train_result < best_train_score):
-        #             break
 if __name__ == "__main__":
     Xi, Xv, y = dataParser()
-    dfm = DeepFM(feature_size=10000, field_size=37, embedding_size=8)
-    dfm.fit(Xi, Xv, y, valid_ratio=0.0)
-    # print(Xv)
+    feature_size, field_size = Xi.shape[0], Xi.shape[1]
+    dfm = DeepFM(feature_size, field_size, 8)
+    dfm.fit(Xi, Xv, y, valid_ratio=0.3)
