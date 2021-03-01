@@ -1,13 +1,11 @@
 import random
 import numpy as np
-import pandas as pd
 import tensorflow as tf
 import config
-from time import time
+
+# import pickle
 from sklearn.model_selection import train_test_split
 from DataReader import dataParser
-
-from tensorflow.python import debug as tf_debug
 
 
 class DeepFM(object):
@@ -25,13 +23,13 @@ class DeepFM(object):
 
     """
 
-    def __init__(self, feature_size, field_size, embedding_size, cfg=config):
+    def __init__(self, feature_size, field_size, cfg=config):
         self.feature_size = feature_size
         self.field_size = field_size
-        self.embedding_size = embedding_size
         self.dfm_params = cfg.dfm_params
-        self.batch_size = cfg.dfm_params["batch_size"]
-        self.epoch = cfg.dfm_params["epoch"]
+        self.embedding_size = self.dfm_params["embedding_size"]
+        self.batch_size = self.dfm_params["batch_size"]
+        self.epoch = self.dfm_params["epoch"]
         self._init_graph()
 
     def _init_weights(self):
@@ -135,15 +133,15 @@ class DeepFM(object):
                 tf.multiply(self.y_first_order_embedding, self.reshaped_feat_value),
                 2,
                 name="y_first_order",
-            )  # None * F * 1
-            # self.y_first_order = tf.nn.dropout()
+            )  # None * F
+            self.y_first_order = tf.nn.dropout(
+                self.y_first_order, self.dfm_params["dropout_keep_fm"][0]
+            )
 
             # second order items
             self.embeddings = tf.nn.embedding_lookup(
                 self.weights["feature_embeddings"], self.feat_index
             )  # None * F * K, latent vector V
-            # self.reshaped_feat_value = tf.reshape(
-            #     self.feat_value, [-1, self.field_size, 1])
             self.embeddings = tf.multiply(self.embeddings, self.reshaped_feat_value)
             self.embeddings_sum = tf.reduce_sum(self.embeddings, 1)
             self.embeddings_sum_square = tf.square(self.embeddings_sum)  # None * K
@@ -155,8 +153,9 @@ class DeepFM(object):
                 tf.subtract(self.embeddings_sum_square, self.embeddings_square_sum),
                 name="y_second_order",
             )
-
-            # self.y_second_order = tf.nn.dropout()
+            self.y_second_order = tf.nn.dropout(
+                self.y_second_order, self.dfm_params["dropout_keep_fm"][1]
+            )
 
             # deep component
             self.y_deep = tf.reshape(
@@ -168,6 +167,9 @@ class DeepFM(object):
                     self.weights["bias_%d" % i],
                 )
                 self.y_deep = self.dfm_params["deep_layer_activation"](self.y_deep)
+                self.y_deep = tf.nn.dropout(
+                    self.y_deep, self.dfm_params["dropout_keep_deep"][i]
+                )
 
             # DeepFM
             self.concat_input = tf.concat(
@@ -255,6 +257,15 @@ class DeepFM(object):
         )
         return loss, final_output
 
+    # # debug
+    # def debug(self, Xi, Xv, y):
+    #     feed_dict = {self.feat_index: Xi, self.feat_value: Xv, self.label: y}
+    #     weights, embeddings, y_first_order, y_second_order = self.sess.run(
+    #         (self.weights, self.embeddings, self.y_first_order, self.y_second_order),
+    #         feed_dict=feed_dict,
+    #     )
+    #     return weights, embeddings, y_first_order, y_second_order
+
     def fit(
         self,
         Xi,
@@ -302,16 +313,30 @@ class DeepFM(object):
             if eval_mode:
                 correct = 0
                 val_loss, final_output = self.eval(Xi_valid, Xv_valid, y_valid)
-            final_output = [[1] if output >= 0.5 else [0] for output in final_output]
-            for i in range(len(y_valid)):
-                if final_output[i] == y_valid[i]:
-                    correct += 1
-            ratio = correct / len(y_valid)
-            print("val loss is %.4f, accuracy is %.4f" % (val_loss, ratio))
+                final_output = [
+                    [1] if output >= 0.5 else [0] for output in final_output
+                ]
+                for i in range(len(y_valid)):
+                    if final_output[i] == y_valid[i]:
+                        correct += 1
+                ratio = correct / len(y_valid)
+                print("val loss is %.4f, accuracy is %.4f" % (val_loss, ratio))
+
+        # # debug
+        # weights, embeddings, y_first_order, y_second_order = self.debug(
+        #     Xi_valid[:100], Xv_valid[:100], y_valid[:100]
+        # )
+        # with open("./debug/weights.pkl", "wb") as f:
+        #     pickle.dump(weights, f)
+        # np.savetxt("./debug/Xi.csv", Xi_valid[:100], fmt="%d")
+        # np.savetxt("./debug/Xv.csv", Xv_valid[:100], fmt="%.8f")
+        # np.savetxt("./debug/y_label.csv", y_valid[:100], fmt="%d")
+        # np.save("./debug/embeddings.npy", embeddings)
+        # np.savetxt("./debug/y_first_order.csv", y_first_order, fmt="%.8f")
+        # np.savetxt("./debug/y_second_order.csv", y_second_order, fmt="%.8f")
 
 
 if __name__ == "__main__":
-    Xi, Xv, y = dataParser()
-    feature_size, field_size = Xi.shape[0], Xi.shape[1]
-    dfm = DeepFM(feature_size, field_size, 8)
-    dfm.fit(Xi, Xv, y, valid_ratio=0.3)
+    Xi, Xv, y, feature_size, field_size = dataParser()
+    dfm = DeepFM(feature_size, field_size)
+    dfm.fit(Xi, Xv, y, valid_ratio=0.2)

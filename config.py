@@ -33,18 +33,18 @@ dfm_params = {
     "use_fm":True,
     "use_deep":True,
     "embedding_size":8,
-    "dropout_fm":[1.0,1.0],
+    "dropout_keep_fm":[1.0,1.0],
     "deep_layers":[32,32],
-    "dropout_deep":[0.5,0.5,0.5],
+    "dropout_keep_deep":[0.5,0.5,0.5],
     "deep_layer_activation":tf.nn.relu,
-    "epoch":80,
+    "epoch":100,
     "batch_size":1024,
-    "learning_rate":0.001,
+    "learning_rate":1e-4,
     "optimizer":"adam",
     "batch_norm":1,
     "batch_norm_decay":0.995,
     "l2_reg":0.01,
     "verbose":True,
     "eval_metric":'gini_norm',
-    "random_seed":300
+    "random_seed":400
 }
